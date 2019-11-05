@@ -42,10 +42,8 @@ class Updater(chainer.training.StandardUpdater):
 # Compute cosine of angle defect
 def compute_cos_angle(vert,face,theta,xp):
     # TODO: it is better to iterate over vertex neighbours rather than over faces
-    cc = xp.cos(theta)
-    ss = xp.sin(theta)
-    cos_angle=[Variable(cc[i:(i+1)]) for i in range(len(cc))]
-    sin_angle=[Variable(ss[i:(i+1)]) for i in range(len(ss))]
+    cos_angle = Variable(xp.cos(theta))
+    sin_angle = Variable(xp.sin(theta))
     for f in face:
         n = len(f)
         id_p = xp.array([f[(i-1)%n] for i in range(n+1)])
@@ -55,15 +53,16 @@ def compute_cos_angle(vert,face,theta,xp):
         D = F.sum((vert[id_n] - vert[ id_p[:-1] ])**2, axis=1)
         c1 = (L[:n]+L[1:]-D)/(2*F.sqrt(L[:n]*L[1:]))
         s1 = F.sqrt(1-c1**2)
-        for j,k in enumerate(f):
-            c0, s0 = cos_angle[k],sin_angle[k]
-            cos_angle[k] = c0*c1[j] - s0*s1[j]
-            sin_angle[k] = c0*s1[j] + s0*c1[j]
+        # trigonometric addition formula
+        c0 = cos_angle[f]
+        s0 = sin_angle[f]
+        cos_angle = F.scatter_add(cos_angle,f,-c0 + c0*c1 - s0*s1)
+        sin_angle = F.scatter_add(sin_angle,f,-s0 + c0*s1 + s0*c1)
     return cos_angle
 
 # Compute gaussian curvature
 def compute_curvature(vert,face,xp):
-    K = [Variable(xp.array([2*xp.pi]))] * len(vert)
+    K = Variable(xp.full((len(vert),), 2*xp.pi))
     for f in face:
         n = len(f)
         id_p = xp.array([f[(i-1)%n] for i in range(n+1)])
@@ -72,9 +71,7 @@ def compute_curvature(vert,face,xp):
         L = F.sum((vert[id_p] - vert[id])**2, axis=1)
         D = F.sum((vert[id_n] - vert[ id_p[:-1] ])**2, axis=1)
         c1 = (L[:n]+L[1:]-D)/(2*F.sqrt(L[:n]*L[1:]))
-        ac = F.arccos(c1)
-        for j in range(n):
-            K[f[j]] -= ac[j]
+        K = F.scatter_add(K,f,-F.arccos(c1))
     return K
 
 #####################################################################################
