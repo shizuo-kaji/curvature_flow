@@ -109,14 +109,11 @@ parser.add_argument('--gpu', '-g', type=int, default=-1,
                     help='GPU ID (negative value indicates CPU)')
 parser.add_argument('--outdir', '-o', default='result',
                     help='Directory to output the result')
-parser.add_argument('--optimizer', '-op',choices=optim.keys(),default='Adam',
-                    help='optimizer')
+parser.add_argument('--optimizer', '-op',choices=optim.keys(),default='Adam', help='optimizer')
 parser.add_argument('--scaling', '-s', type=float, default=-1, help="scaling")
 parser.add_argument('--lambda_bdedge', '-le', type=float, default=0, help="weight for boundary constraint")
 parser.add_argument('--lambda_bdvert', '-lv', type=float, default=0, help="weight for boundary constraint")
-parser.add_argument('--learning_rate', '-lr', type=float, default=1e-2,
-                    help='learning rate')
-parser.add_argument('--salt', action='store_true',help='add salt to randomise initial coordinates')
+parser.add_argument('--learning_rate', '-lr', type=float, default=1e-2, help='learning rate')
 parser.add_argument('--verbose', '-v', action='store_true',help='print debug information')
 args = parser.parse_args()
 
@@ -248,14 +245,15 @@ plot_trimesh(vert2,face,os.path.join(args.outdir,"out.png"))
 save_ply(vert2,face,os.path.join(args.outdir,args.output))
 # graphs
 n = len(ca)
-Y = [c.item() for c in ca_final] + [c.item() for c in ca_ricci]
-sns.violinplot(x=np.array([0]*n), y=Y[-n:])
-plt.savefig(os.path.join(args.outdir,"curvature_ricci.png"))
+sns.violinplot(x=np.array([0]*n), y=[c.item() for c in ca_ricci], cut=0)
+plt.savefig(os.path.join(args.outdir,"curvature_target.png"))
 plt.close()
-sns.violinplot(x=np.array([0]*n + [1]*n), y=Y)
-plt.savefig(os.path.join(args.outdir,"curvature.png"))
+sns.violinplot(x=np.array([0]*n), y=[c.item() for c in ca_final], cut=0)
+plt.savefig(os.path.join(args.outdir,"curvature_final.png"))
 plt.close()
-error = [abs(ca_final[i].item()-ca_ricci[i].item())/ca_ricci[i].item() for i in range(len(ca_final))]
-error += [abs(ca_ricci[i].item()-0.01)/0.01 for i in range(len(ca_final))]
-sns.violinplot(x=np.array([0]*n + [1]*n), y=error, cut=0)
-plt.savefig(os.path.join(args.outdir,"error.png"))
+sns.violinplot(x=np.array([0]*n), y=[abs(ca_ricci[i].item()-args.targetK[i])/args.targetK[i] for i in range(len(ca_ricci))], cut=0)
+plt.savefig(os.path.join(args.outdir,"error_target.png"))
+plt.close()
+sns.violinplot(x=np.array([0]*n), y=[abs(ca_final[i].item()-ca_ricci[i].item())/ca_ricci[i].item() for i in range(len(ca_final))], cut=0)
+plt.savefig(os.path.join(args.outdir,"error_final.png"))
+plt.close()
