@@ -62,69 +62,6 @@ def plot_trimesh(verts,faces,fname):
     plt.close()
 #    plt.show()
 
-## updater 
-class Updater(chainer.training.StandardUpdater):
-    def __init__(self, *args, **kwargs):
-        self.coords = kwargs.pop('models')
-        params = kwargs.pop('params')
-        super(Updater, self).__init__(*args, **kwargs)
-        self.args = params['args']
-        self.faces = params['faces']
-        self.N = params['N']
-        if self.args.fixed_coordinates is not None:
-            self.fixed_coords = self.coords.xp.loadtxt(self.args.fixed_coordinates)[self.args.fixed_vert]
-#            print( np.sum( (self.fixed_coords[:10]-self.coords.W.array[self.args.fixed_vert][:10])**2, axis=1 ))
-#            print(self.args.fixed_vert, self.fixed_coords.shape)
-            print("initial boundary squared-error: ", (self.coords.xp.sum( (self.fixed_coords-self.coords.W.array[self.args.fixed_vert])**2 )))
-        else:
-            self.fixed_coords = self.coords.W.array[self.args.fixed_vert]  # keep the fixed coords (note: deep copied)
-        self.force_upward = False
-
-    def update_core(self):
-        opt = self.get_optimizer('opt')
-        xp = self.coords.xp
-        b = self.get_iterator('main').next()
-        vert = self.coords.W
-        if self.args.optimise_cos:
-#            ca = compute_cos_angle(self.coords.W,self.faces,self.args.target_curvature,xp)
-#            loss =  sum([1-ca[i] for i in self.args.constrained_vert])   #/len(self.args.free_vert)
-            ca = compute_cos_angle_sub(vert,self.N,self.args.target_curvature,b,xp)
-            loss =  sum([1-ca[i] for i in range(len(ca))])/len(b)
-        else:
-#            K = compute_curvature(vert,self.faces,xp)
-#            loss = sum([(K[i]-self.args.target_curvature[i])**2 for i in self.args.constrained_vert])
-            K = compute_curvature_sub(vert,self.N,b)
-            loss = sum([(K[i]-self.args.target_curvature[b[i]])**2 for i in range(len(b))])/len(b)
-#            print([(i,K[i],self.args.target_curvature[b[i]]) for i in range(len(b))])
-        chainer.report({'loss': loss.item()}, self.coords)
-
-        if self.force_upward: # each vertex should be higher in z direction than the average of neighbours
-            for i in b:
-                up = F.sum(vert[i]-vert[self.N[i][:,0]],axis=0)
-                fn = [0,0,0]
-                for k in range(len(self.N[i])):
-                    q = cross(vert[self.N[i][k,1]] - vert[i], vert[self.N[i][k,0]] - vert[i])
-                    fn[0] += q[0]
-                    fn[1] += q[1]
-                    fn[2] += q[2]
-                loss_upward = F.relu(-inprod(fn,up)-0.1)**2
-            chainer.report({'loss_up': loss_upward}, self.coords)
-            loss += self.args.lambda_upward * loss_upward
-
-        if self.args.lambda_bdvert>0:
-            loss_bdv = F.sum( (self.fixed_coords-vert[self.args.fixed_vert])**2 )
-            chainer.report({'loss_bdv': loss_bdv}, self.coords)
-            loss += self.args.lambda_bdvert * loss_bdv
-
-        self.coords.cleargrads()
-        loss.backward()
-        opt.update(loss=loss)
-
-        if self.args.strict_boundary:
-            self.coords.W.array[self.args.fixed_vert] = self.fixed_coords
-
-        if (self.iteration) % self.args.vis_freq == 0 and self.args.vis_freq>0:
-            plot_trimesh(self.coords.W.array,self.faces,os.path.join(self.args.outdir,'count{:0>4}.jpg'.format(self.iteration)))
 
 # Compute cosine of angle defect
 def compute_cos_angle(vert,face,theta,xp):
@@ -236,6 +173,64 @@ def neighbour(n,face):
         F[f[-1]].append([f[-2],f[0]])
     return([np.array(F[i]) for i in range(n)])
 
+######################################################################
+## updater 
+class Updater(chainer.training.StandardUpdater):
+    def __init__(self, *args, **kwargs):
+        self.coords = kwargs.pop('models')
+        params = kwargs.pop('params')
+        super(Updater, self).__init__(*args, **kwargs)
+        self.args = params['args']
+        self.faces = params['faces']
+        self.N = params['N']
+        self.fixed_coords = params['fixed_coords']
+        self.force_upward = False
+
+    def update_core(self):
+        opt = self.get_optimizer('opt')
+        xp = self.coords.xp
+        b = self.get_iterator('main').next()
+        vert = self.coords.W
+        if self.args.optimise_cos:
+#            ca = compute_cos_angle(self.coords.W,self.faces,self.args.target_curvature,xp)
+#            loss =  sum([1-ca[i] for i in self.args.constrained_vert])   #/len(self.args.free_vert)
+            ca = compute_cos_angle_sub(vert,self.N,self.args.target_curvature,b,xp)
+            loss =  sum([1-ca[i] for i in range(len(ca))])/len(b)
+        else:
+#            K = compute_curvature(vert,self.faces,xp)
+#            loss = sum([(K[i]-self.args.target_curvature[i])**2 for i in self.args.constrained_vert])
+            K = compute_curvature_sub(vert,self.N,b)
+            loss = sum([(K[i]-self.args.target_curvature[b[i]])**2 for i in range(len(b))])/len(b)
+#            print([(i,K[i],self.args.target_curvature[b[i]]) for i in range(len(b))])
+        chainer.report({'loss': loss.item()}, self.coords)
+
+        if self.force_upward: # each vertex should be higher in z direction than the average of neighbours
+            for i in b:
+                up = F.sum(vert[i]-vert[self.N[i][:,0]],axis=0)
+                fn = [0,0,0]
+                for k in range(len(self.N[i])):
+                    q = cross(vert[self.N[i][k,1]] - vert[i], vert[self.N[i][k,0]] - vert[i])
+                    fn[0] += q[0]
+                    fn[1] += q[1]
+                    fn[2] += q[2]
+                loss_upward = F.relu(-inprod(fn,up)-0.1)**2
+            chainer.report({'loss_up': loss_upward}, self.coords)
+            loss += self.args.lambda_upward * loss_upward
+
+        if self.args.lambda_bdvert>0:
+            loss_bdv = F.sum( (self.fixed_coords-vert[self.args.fixed_vert])**2 )
+            chainer.report({'loss_bdv': loss_bdv}, self.coords)
+            loss += self.args.lambda_bdvert * loss_bdv
+
+        self.coords.cleargrads()
+        loss.backward()
+        opt.update(loss=loss)
+
+        if self.args.strict_boundary:
+            self.coords.W.array[self.args.fixed_vert] = self.fixed_coords
+
+        if (self.iteration) % self.args.vis_freq == 0 and self.args.vis_freq>0:
+            plot_trimesh(self.coords.W.array,self.faces,os.path.join(self.args.outdir,'count{:0>4}.jpg'.format(self.iteration)))
 
 #####################################################################################
 #-----------------------
@@ -245,9 +240,8 @@ def main():
     parser.add_argument('--output', default="output.ply", help='output ply filename')
     parser.add_argument('--target_curvature', '-K', default=None, type=str, help='file containing target gaussian curvature')
     parser.add_argument('--target_curvature_scalar', '-Ks', default=0.01, type=float, help='target gaussian curvature value')
-    parser.add_argument('--fixed_vert', '-fv', default=None, type=str, help='file containing indices of fixed vertices')
-    parser.add_argument('--fixed_coordinates', '-fc', default=None, type=str, help='file containing coordinates vertices (including fixed ones)')
-    parser.add_argument('--constrained_vert', '-cv', default=None, type=str, help='file containing indices of K-constrained vertices')
+    parser.add_argument('--constrained_vert', '-cv', default=None, type=str, help='file containing indices of vertices with curvature target')
+    parser.add_argument('--boundary_vertex', '-bv', default=None, help='Path to a csv specifying boundary position')
     parser.add_argument('--lambda_bdvert', '-lv', type=float, default=0, help="weight for boundary constraint")
     parser.add_argument('--strict_boundary', '-sbd', action='store_true',help='strict boundary constraint')
     parser.add_argument('--lambda_upward', '-lu', type=float, default=0, help="weight for upwardness")
@@ -292,20 +286,27 @@ def main():
 
     # determine fixed vertices
     args.vert = range(len(vert))
-    if args.fixed_vert:
-        args.fixed_vert = np.loadtxt(args.fixed_vert).astype(np.uint16)
+    if args.boundary_vertex:
+        bddat = np.loadtxt(args.boundary_vertex,delimiter=",")
+        args.fixed_vert = bddat[:,0].astype(np.uint32)
+        fixed_coords = bddat[:,1:]
     else:
         args.fixed_vert = np.where( args.target_curvature > 2*np.pi )[0]
+        fixed_coords = vert[args.fixed_vert]
+#        np.savetxt("boundary.csv", np.hstack([args.fixed_vert[:,np.newaxis],fixed_coords]),delimiter=",",fmt='%i,%f,%f,%f')
+
+
     args.free_vert = list(set(args.vert) - set(args.fixed_vert))
     if args.constrained_vert:
         args.constrained_vert = np.loadtxt(args.constrained_vert).astype(np.uint16)
     else:
         args.constrained_vert = list(set(args.free_vert) - set(np.where( args.target_curvature == -99 )[0]))
+#        np.savetxt("cv.txt", args.constrained_vert, fmt='%i')
     if args.salt:
         vert[args.free_vert] += np.random.randn(*vert[args.free_vert].shape)*1e-4
 
 
-    print("\nvertices {}, faces {}, fixed vertices {}, K-constrained {}".format(len(vert),len(face),len(args.fixed_vert),len(args.constrained_vert)))
+    print("\nvertices {}, faces {}, fixed vertices {}, vertices with target curvature {}".format(len(vert),len(face),len(args.fixed_vert),len(args.constrained_vert)))
     if args.batchsize < 0:
         args.batchsize = (len(args.constrained_vert)+1) //2
     ######################################
@@ -328,7 +329,7 @@ def main():
         iterator=id_iter,
         optimizer={'opt': opt},
         device=args.gpu,
-        params={'args': args, 'faces': face, 'N': N}
+        params={'args': args, 'faces': face, 'N': N, 'fixed_coords': fixed_coords}
         )
     trainer = training.Trainer(updater, (args.epoch, 'epoch'), out=args.outdir)
 
@@ -359,10 +360,6 @@ def main():
     ca_final = compute_curvature_sub(vert2,N,args.constrained_vert,verbose=True)
     print("\n\n (final,target) Curvature: ", [(round(ca_final[i].item(),5),args.target_curvature[j]) for i,j in enumerate(args.constrained_vert)])
 
-    if args.fixed_coordinates is not None:
-        fixed_coords = np.loadtxt(args.fixed_coordinates)[args.fixed_vert]
-    else:
-        fixed_coords = vert[args.fixed_vert]
     print("boundary squared-error: ", (np.sum( (fixed_coords-vert2[args.fixed_vert])**2 ) ))
 
     # output
@@ -378,11 +375,11 @@ def main():
     sns.violinplot(x=np.array([0]*n ), y=[c.item() for c in ca])
     plt.savefig(os.path.join(args.outdir,"curvature_init.png"))
     plt.close()
-    error = [abs(ca_final[i].item()-args.target_curvature[j])/args.target_curvature[j] for i,j in enumerate(args.constrained_vert)]
+    error = [abs(ca_final[i].item()-args.target_curvature[j]) for i,j in enumerate(args.constrained_vert)]
     sns.violinplot(x=np.array([0]*n), y=error, cut=0)
     plt.savefig(os.path.join(args.outdir,"error_final.png"))
     plt.close()
-    error = [abs(ca[i].item()-args.target_curvature[j])/args.target_curvature[j] for i,j in enumerate(args.constrained_vert)]
+    error = [abs(ca[i].item()-args.target_curvature[j]) for i,j in enumerate(args.constrained_vert)]
     sns.violinplot(x=np.array([0]*n), y=error, cut=0)
     plt.savefig(os.path.join(args.outdir,"error_init.png"))
     plt.close()
