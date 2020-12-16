@@ -37,7 +37,9 @@ if args.constrained_vert is None:
 
 if (ext==".ply"):
     plydata = PlyData.read(args.input)
-    vert = np.vstack([plydata['vertex']['x'],plydata['vertex']['y'],plydata['vertex']['z']]).astype(np.float64).T
+    vert = np.vstack([plydata['vertex']['x'],plydata['vertex']['y'],plydata['vertex']['z']]).T
+#    vert2 = np.loadtxt(fn+"_init.txt")
+#    print(np.abs(vert-vert2).sum())
     face = plydata['face']['vertex_indices']
     edgedat = np.loadtxt(args.edge_length,delimiter=",")
     inedge = edgedat[:,:2].astype(np.uint32)
@@ -64,8 +66,8 @@ else:  # old style input data format
     vert_init = np.loadtxt(fn+"_init.txt")
     fixed_coords = vert_init[args.fixed_vert]
     edgelen = dmat[inedge[:,0],inedge[:,1]]
-    np.savetxt(fn+"_edge.csv", np.hstack([inedge,edgelen[:,np.newaxis]]),delimiter=",")
-    np.savetxt(fn+"_boundary.csv", np.hstack([args.fixed_vert[:,np.newaxis],fixed_coords]),delimiter=",")
+#    np.savetxt(fn+"_edge.csv", np.hstack([inedge,edgelen[:,np.newaxis]]),delimiter=",")
+#    np.savetxt(fn+"_boundary.csv", np.hstack([args.fixed_vert[:,np.newaxis],fixed_coords]),delimiter=",")
 
 # set target curvature
 if args.target_curvature:
@@ -87,11 +89,15 @@ print("\nvertices {}, faces {}, fixed vertices {}, K-constrained {}".format(len(
 # %%
 ca_final = compute_curvature_sub(vert,N,args.constrained_vert,verbose=True)
 ca_dmat = compute_curvature_dmat_sub(dmat,N,args.constrained_vert)
-print("\n\n (final,dmat,target) Curvature: ", [(round(ca_final[i].item(),5),round(ca_dmat[i].item(),5),round(args.targetK[i],5)) for i in range(len(args.constrained_vert))])
+K_final = np.array([ca_final[i].item() for i in range(len(args.constrained_vert))])
+K_dmat = np.array([ca_dmat[i].item() for i in range(len(args.constrained_vert))])
+K_error = np.abs(K_final-args.targetK[args.constrained_vert])
 bd_error = ( (fixed_coords-vert[args.fixed_vert])**2 )
 l2 = np.sum( (vert[inedge[:,0]]-vert[inedge[:,1]])**2, axis=1 )
 edge_error = (l2-dmat[inedge[:,0],inedge[:,1]]**2)**2
-print("edge^2 squared error: {}, boundary squared error: {}".format(np.sum(edge_error),np.sum(bd_error)))
+
+print("edge^2 squared error: {}, boundary squared error: {}, curvature error: {}".format(np.sum(edge_error),np.sum(bd_error), np.sum(K_error)))
+print("curvature error (dmat-target): {}".format(np.sum(K_dmat-args.targetK[args.constrained_vert])))
 np.savetxt(os.path.join(args.outdir,"edge_final.csv"),np.hstack([inedge,dmat[inedge[:,0],inedge[:,1]][:,np.newaxis]]),delimiter=",",fmt="%i,%i,%f")
 
 # graphs
